@@ -317,6 +317,10 @@
           ></rivo-favorite-button>
         </div>
       </div>
+
+      {%- render "find-in-store" with {
+        isGatedProduct: isGatedProduct,
+      } -%}
     {%- endif -%}
 
     {%- comment -%}Gated Access Products{%- endcomment -%}
