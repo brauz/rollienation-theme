@@ -1,0 +1,478 @@
+{% comment %}
+  Product Form
+    Liquid form that renders the form element required to add products to
+    cart, the variant data, swatch elements and any pricing that is to
+    be updated on variant change.
+
+  Params {
+    formProduct:Product = product
+    variant:Variant = product.selected_or_first_available_variant
+    class?:string,
+    description?:string
+    discountValue:number = 0
+    discountTitle?:string,
+    discountTitleColour?:hex colour,
+    discountAccBorderColor?:hex colour,
+    discountMessaging?:string
+    countdownDate?:string
+    countdownPostfix?:string
+    loopReturnsValue?:string
+    customHTML?:string
+    productTitle?:string = Product title markup
+  }
+
+  Version:
+    1.0.0 - 2022/09/04
+{% endcomment %}
+
+{%- liquid
+  assign formProduct = formProduct | default: product
+  assign variant = formProduct.selected_or_first_available_variant
+  assign class = 'c-product-form ' | append: class
+  assign isWaitlist = false
+  assign isGatedProduct = false
+  assign promo_product = false
+  assign promo_enabled = settings.enable_promotion
+  assign promo_tag = settings.promotion_tag
+  assign promo_all_products = settings.promo_all_products
+
+  if template contains 'product'
+    assign productType = formProduct.type | handleize
+    if productType == 'gift-card'
+      assign class = class | append: ' is-gift-card'
+    endif
+
+    for pTag in formProduct.tags
+      if pTag == 'waitlist'
+        assign isWaitlist = true
+      endif
+
+      if pTag contains "countdown:"
+        assign waitlistCountdownDate = pTag | remove: "countdown:" | replace: " - ", "-"
+      endif
+
+      if pTag contains "klaviyo:"
+        assign waitlistKlaviyoFormId = pTag | remove: "klaviyo:"
+      endif
+      
+      if pTag contains "gated-product"
+        assign isGatedProduct = true
+      endif
+
+      if pTag == promo_tag
+        assign promo_product = true
+        break
+      endif
+    endfor
+  endif
+
+  if product.type == 'Accessories'
+    assign class = class | append: ' is-accessories'
+  endif
+
+  if isWaitlist == true
+    assign class = class | append: ' is-waitlist'
+  endif
+
+  assign is_preorder = false
+
+  assign lc_tags = product.tags | downcase
+  assign has_preorder_tag = false
+  if lc_tags contains "preorder"
+    assign has_preorder_tag = true
+  endif
+  
+  assign is_presale_product = false
+  if lc_tags contains "presale"
+    assign is_presale_product = true
+  endif
+
+  if variant.inventory_quantity <= 0 and variant.inventory_policy == 'continue' and has_preorder_tag
+    assign is_preorder = true
+  endif
+-%}
+
+{% capture shipping_message_ui %}
+  {%- liquid
+    assign shipping_message = product.metafields.accentuate.shipping_delay_message
+    assign sell_ahead_variants = ''
+    
+    for p_variant in product.variants
+      if p_variant.metafields.custom.sell_ahead
+        assign sell_ahead_variants = sell_ahead_variants | append: p_variant.id | append: ','
+      endif
+    endfor
+    
+    assign sell_ahead_variants = sell_ahead_variants | split: ','
+  -%}
+  {%- if shipping_message != blank and sell_ahead_variants.size < 1 -%}
+    <p 
+      class="c-product-form__preorder-message o-type--2--caps" 
+      data-shipping-message
+    >
+      {{- shipping_message -}}
+    </p>
+  {%- elsif sell_ahead_variants.size > 0 -%}
+    <p 
+      class="c-product-form__sell-ahead-message o-type--2--caps" 
+      data-sell-ahead-message
+      data-sell-ahead-variants="{{ sell_ahead_variants | join: ',' }}"
+      {% liquid 
+        assign selectedId = '' | append: formProduct.selected_variant.id
+        for v in sell_ahead_variants
+          if v == selectedId
+            echo 'data-sell-ahead-variant-selected="true"'
+          endif
+        endfor 
+      %}
+    >
+      {{- shipping_message -}}
+    </p>
+  {%- endif -%}
+{% endcapture %}
+
+{% capture mf_based_discount %}
+  {%- comment -%} Discount Messaging {%- endcomment -%}
+  {%- if discountMessaging != blank -%}
+    <div class="c-product-form__discount">
+      <div class="c-product-form__discount-container">
+        {% assign discountTitleColour = discountTitleColour | default: 'var(--base-text-color)'%}
+        {% assign discountAccBorderColor = discountAccBorderColor | default: 'var(--base-text-color)'%}
+        {% capture discountTitleUi %}
+          {% if discountTitle %}
+            <h6 class="o-paragraph--2" style="color: {{ discountTitleColour }};">{{- discountTitle -}}</h6>
+          {% endif %}
+        {% endcapture %}
+        {% capture discountMessagingUi %}
+          <p class="c-product-form__discount-text">
+            {% liquid 
+              assign discountMessagingArray = discountMessaging | split: '||'
+              if discountMessagingArray.size > 1
+                assign discountMessaging = discountMessagingArray[0] | append: ' <br><small>' | append: discountMessagingArray[1] | append: '</small>'
+              endif
+            %}
+            {{- discountMessaging -}}
+          </p>
+        {% endcapture %}
+        {% capture discountCountdownUi %}
+          {%- if countdownDate != blank -%}
+            <p
+              class="c-product-form__discount-countdown o-paragraph--2"
+              data-discount-countdown-timer
+              data-countdown-date="{{- countdownDate -}}"
+              data-countdown-postfix="{{- countdownPostfix -}}"
+            ></p>
+          {%- endif -%}
+        {% endcapture %}
+        {% if discountTitle and discountMessaging %}
+        {%- comment -%}
+          Display Accordion UI for discount messaging
+        {%- endcomment -%}
+          <details style="border: 1px solid {{ discountAccBorderColor }}">
+            <summary>{{ discountTitleUi }}</summary>
+            {{ discountMessagingUi }}
+            {{ discountCountdownUi }}
+          </details>
+        {% else %}
+          {{ discountTitleUi }}
+          {{ discountMessagingUi }}
+          {{ discountCountdownUi }}
+        {% endif %}
+      </div>
+    </div>
+  {%- endif -%}
+{% endcapture %}
+
+{%- if formProduct != blank -%}
+  {%- form 'product', formProduct, class: class, data-product-form: '' -%}
+    <input type="hidden" class="pid" value="{{product.id}}">
+    <input type="hidden" class="ptitle" value="{{product.title | remove: "'" | remove: '"'}}">
+    <input type="hidden" class="pprice" value="{{product.variants.first.price | times: 0.01}}">
+    <input type="hidden" class="pbrand" value="{{product.vendor | remove: "'" | remove: '"'}}">
+    <input type="hidden" class="ptype" value="{{product.type | remove: "'" | remove: '"'}}">
+    <input type="hidden" class="pcollection" value="{{ product.collections.last.title | remove: "'" | remove: '"' }}">
+    {% unless promo_all_products %}
+      {% if promo_enabled and promo_product %}
+        <input type="hidden" name="_PromoProduct" value="true">
+        <input type="hidden" name="_LPROP" value="Final Sale">
+      {% endif %}
+    {% endunless %}
+    <input 
+      type="hidden" 
+      name="selling_plan" 
+      value=""
+      data-selling-plans-field
+      data-selling-plans={{ product.metafields.submarine.presales.value | json }}
+    >
+
+    <div class="product-title--form">
+      {{ productTitle }}
+    </div>
+
+    {%- comment -%} Okendo stars go here {%- endcomment -%}
+    {% render 'okendo-reviews-product-rating-summary', product: product %}
+    
+    <div class="c-product-form__price-container">
+      {%- comment -%} Product Pricing - default + compare_at {%- endcomment -%}
+      {%- render 'object.product-pricing' with {
+        id: variant.id
+        price: variant.price,
+        comparePrice: variant.compare_at_price,
+        class: 'c-product-form__pricing',
+        headingClass: '',
+        discountValue: discountValue,
+        isGatedProduct: isGatedProduct,
+        mfBasedDiscount: mf_based_discount
+      } -%}
+    </div>
+
+    {%- comment -%} PDP Promotions {%- endcomment -%}
+    {% render 'pdp-promos' %}
+
+    {%- comment -%} Fake Swatches {%- endcomment -%}
+    {%- render 'object.swatches-fake' with {
+      swatchesProduct: formProduct,
+      class: 'c-product-form__fake-swatches'
+    } -%}
+
+    {%- comment -%}Promotions{%- endcomment -%}
+    {%- render 'object.promotion' with {
+      promo_all_products: promo_all_products,
+      promo_product: promo_product,
+      enabled: promo_enabled,
+      class: 'c-product-form__promotion'
+    } -%}
+
+    {%- comment -%} Waitlist {%- endcomment -%}
+    {%- if isWaitlist == true -%}
+      {%- render 'product-form-waitlist' with {
+        countdownDate: waitlistCountdownDate,
+        klaviyoFormId: waitlistKlaviyoFormId
+      } -%}
+    {%- else -%}
+      {%- comment -%} Variant Selector and Swatches {%- endcomment -%}
+      {%- render 'object.swatches' with {
+        swatchesProduct: formProduct,
+        variant: variant,
+        class: 'c-product-form__swatches',
+        shippingDelayMessage: shipping_message_ui
+      } -%}
+
+      {%- comment -%} Quantity Selector {%- endcomment -%}
+      <input type="hidden" name="quantity" value="1" data-product-form-qty>
+
+      {%- comment -%} Loop Returns Property {%- endcomment -%}
+      {%- if loopReturnsValue != blank -%}
+        <input
+          type="hidden" name="_LPROP" value="{{- loopReturnsValue -}}"
+          data-product-form-lprop
+        >
+      {%- endif -%}
+
+        {%- comment -%}
+          if there's no selected variant I won't print anything and prompt the user to select one
+          However if the prod has only the default variant this should not happen obviously
+        {%- endcomment -%}
+
+      {% liquid 
+        assign selectedVariant = product.selected_variant
+        if product.has_only_default_variant or selectorProduct.variants.size < 2
+          assign selectedVariant = product.variants.first
+        endif
+      %}
+
+      <div class="c-product-form__cta-wrap">
+        {%- comment -%} Add to Cart - button text updated dynamically {%- endcomment -%}
+        <button
+          type="submit"
+          class="c-product-form__add-btn o-btn is-primary{% if selectedVariant and variant.available %}"
+          {%- else %} is-disabled" disabled="disabled"{% endif %}
+          data-product-form-add
+        >
+          {%- liquid
+            if is_presale_product
+              echo 'products.product.presale' | t
+            elsif is_preorder
+              echo 'products.product.preorder' | t
+            elsif variant.available
+              if selectedVariant
+                echo 'products.product.add_to_cart' | t
+              else
+                echo 'products.product.select_size' | t
+              endif
+            else
+              echo 'products.product.sold_out' | t
+            endif
+          -%}
+        </button>
+        {%- comment -%} Wishlist {%- endcomment -%}
+        <div class="c-product-form__wishlist c-product-form__wishlist-inline" data-wishlist-toggle>
+          <rivo-favorite-button
+            class="save-button"
+            data-product-id="{{ product.id }}" 
+            rivo-ax-data
+            rivo-ax-cloak
+            rivo-ax-html="$store.icons.heart"
+            rivo-ax-show="$store.rivo_aw_settings?.favorites_enabled && (!$store.rivo_profile_customer || $store.loading_states.global_favorite_buttons)"
+          ></rivo-favorite-button>
+        </div>
+      </div>
+    {%- endif -%}
+
+    {%- comment -%}Gated Access Products{%- endcomment -%}
+    {% if isGatedProduct and customer == nil %}
+      <p class="c-product-form__gated-heading o-paragraph--2">
+        {% render 'svg.lock-locked' %} {{ settings.pdp_gated_non_customer_heading }}
+      </p>
+      <div class="c-product-form__gated-message">
+        {{ settings.pdp_non_customer_message }}
+      </div>
+    {% endif %}
+
+    {%- comment -%} 
+      ——————————————————————————————————
+      Preorder & Presale
+      ——————————————————————————————————
+      We have 2 separate cases here:
+        1. Item is tagged as Pre-order, has 0 inventory and is marked continue to sell when out of stock
+            - If Submarine is active, will use Submarine presale logic and take deposits
+            - If Submarine is not active, will use default pre-order logic, take full payment & show metafield message
+            - UI wise, we only refer to this as Preorder
+        2. Item is tagged with Presale
+            - Presale is Submarine independant, item can have positive inventory, full payment is taken, customer is informed that this is presale, and when the item will be shipped
+        NOTE: Submarine calls it's data Presales, so we've added `submarine_` prefix to related data, to differenciate
+    {%- endcomment -%}
+    {%- liquid
+        assign submarine_presale = product.metafields.submarine.presales.value | where: 'status', 'launched' | last
+        assign fulfilDate = submarine_presale.fulfil_at | split: 'T'
+        assign fulfilDate = fulfilDate[0] | date: "%B %Y"
+        assign submarine_deposit_message = 'Pay only '
+        assign deposit_value_full = ''
+        if submarine_presale.deposit_type == 'percentage'
+          assign submarine_deposit_message = submarine_deposit_message | append: submarine_presale.deposit_value | append: '%'
+          assign deposit_value_full = submarine_presale.deposit_value | append: '%'
+        else 
+          assign submarine_deposit_message = submarine_deposit_message | append: submarine_presale.deposit_at | money
+          assign deposit_value_full = submarine_presale.deposit_at | money
+        endif
+        assign submarine_deposit_message = submarine_deposit_message | append: ' now and secure your pair!'
+    -%}
+    {% if is_presale_product %}
+      {% assign presale_message = product.metafields.accentuate.presale_message %}
+      {% if presale_message != blank %}
+        <div 
+          class="c-product-form__preorder-message" 
+          data-presale-message="{{ presale_message }}"
+          data-presale-deposit-message=""
+          data-preorder-ui
+        >
+          <p>{{ presale_message }}</p>
+          {%- render 'object.preorders-info', is_presale: true -%}
+        </div>
+      {% endif %}
+    {% elsif settings.use_submarine %}
+      <div 
+        class="c-product-form__preorder-message {% unless is_preorder %}is-hidden{% endunless %}" 
+        data-presale-message="Est. Shipping: {{ fulfilDate }}"
+        data-presale-deposit-message="{{- 'custom.checkout.submarine_presale_in_cart_message' | t: submarine_presale_deposit: deposit_value_full -}}"
+        data-preorder-ui
+      >
+        <p>Est. Shipping: {{ fulfilDate }}</p>
+        <p>{{ submarine_deposit_message }}</p>
+        {%- render 'object.preorders-info' -%}
+      </div>
+    {% else %}
+      {% assign preorder_message = product.metafields.accentuate.preorder_message %}
+      {% if preorder_message != blank %}
+        <div 
+          class="c-product-form__preorder-message {% unless is_preorder %}is-hidden{% endunless %}" 
+          data-presale-message="{{ preorder_message }}"
+          data-presale-deposit-message="{{- 'custom.checkout.presale_in_cart_message' | t -}}"
+          data-preorder-ui
+        >
+          <p>{{ preorder_message }}</p>
+          {%- render 'object.preorders-info' -%}
+        </div>
+      {% endif %}
+    {% endif %}
+
+    {%- if template contains 'product' -%}
+      {% unless isWaitlist == true %}
+        {%- comment -%} Back In Stock {%- endcomment -%}
+        {%- render 'bis-widget' with {
+          class: 'c-product-form__bis',
+          variant: variant
+        } -%}
+      {% endunless %}
+
+      {%- comment -%} Buy Now, Pay Later & Refundid {%- endcomment -%}
+      {% unless isGatedProduct and customer == nil %}
+        <p class="c-product-form__bnpl o-paragraph--3{% if is_preorder %} is-hidden{% endif %}" data-product-form-bnpl>
+          {%- capture klarnaLogo -%}
+            <span class="c-product-form__bnpl-logo is-klarna">
+              {%- render 'svg.klarna-logo' -%}
+            </span>
+          {%- endcapture -%}
+
+          {%- capture afterpayLogo -%}
+            <span class="c-product-form__bnpl-logo is-afterpay">
+              {%- render 'svg.afterpay-logo' -%}
+            </span>
+          {%- endcapture -%}
+
+          {{- 'products.product.buy_now_pay_later_html' | t: klarna: klarnaLogo, afterpay: afterpayLogo -}}
+        </p>
+
+        {% if settings.enable_refundid %}
+        <p class="c-product-form__bnpl o-paragraph--3{% if is_preorder %} is-hidden{% endif %}" data-product-form-bnpl>
+          {%- capture refundidLogo -%}
+            <span class="c-product-form__bnpl-logo is-refundid">
+              {%- render 'svg.refundid-logo' -%}
+            </span>
+          {%- endcapture -%}
+          {{- 'products.product.refundid_html' | t: refundid: refundidLogo, afterpay: afterpayLogo -}}
+        </p>
+        {% endif %}
+
+        {%- comment -%} Include Gift Wrapping {%- endcomment -%}
+        {%- unless product.type == 'Accessories' or product.title contains 'Gift Card' -%}
+          {%- if section.settings.gift_wrapping_prod != blank -%}
+
+            {%- if product.available -%}
+              {%- assign gift_wrapping_product_handle = section.settings.gift_wrapping_prod -%}
+              {%- render 'gift-wrapping' with {
+                gift_wrapping_product_handle: gift_wrapping_product_handle
+              } -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endunless -%}
+      {% endunless %}
+
+      {%- comment -%}
+        Brauz find in store snippet
+
+        <script src="https://d3aq2u4yw77ivo.cloudfront.net/find-in-store/shopify/rollie-nation/find-in-store.shopify.rollie-nation.prod.js" async></script>
+        <div
+          id="brauz-find-in-store-config-product-page"
+          data-sd="rollienation-au.myshopify.com"
+          data-cvi="{{ product.first_available_variant.id }}"
+          data-hodv="{{ product.has_only_default_variant }}"
+          style="display: none; width: 0;"
+        >
+        </div>
+        <div id="brauz-find-in-store-product-page" style="width: 100%;"></div>
+      {%- endcomment -%}
+
+      {%- comment -%} Main Description - description contains HTML {%- endcomment -%}
+      {%- if description != blank -%}
+        <p class="c-product-form__description">
+          {{- description -}}
+        </p>
+      {%- endif -%}
+        
+      {%- if customHTML != blank -%}
+        <div class="c-product-form__custom-code">{{ customHTML }}</div>
+      {%- endif -%}
+    {%- endif -%}
+  {%- endform -%}
+{%- endif -%}
