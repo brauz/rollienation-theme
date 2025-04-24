@@ -1,0 +1,351 @@
+{% comment %}
+  Product Template
+    Base section to form the base of the product template. To use this
+    section outside of the /products/ template simply change what is assigned
+    to "templateProduct" via either a section setting or metafield.
+
+  Version:
+    1.0.0 - 2022/04/09
+{% endcomment %}
+
+{%- render 'tool.assets' with {
+  css: 'sections.product-template',
+  js: 'sections.product-template'
+} -%}
+
+{%- comment -%} Section Variables {%- endcomment -%}
+{%- liquid
+  assign templateProduct = product
+  assign description = templateProduct.description
+  assign shortDescription = templateProduct.metafields.accordions.small_description | newline_to_br
+  assign isGated = false
+  # Get discount information for product
+  # If the product has a discount, get the discount information
+  assign mf = shop.metafields.globals
+  assign mfIndex = nil
+  assign tagsMatch = false
+  assign customerAllowed = true
+
+  for productTag in mf.discount_product_tag
+    assign lcDiscountProductTag = productTag | downcase
+    assign lcProductTags = templateProduct.tags | downcase
+
+    if lcProductTags contains lcDiscountProductTag
+      assign mfIndex = forloop.index0
+      break
+    endif
+  endfor
+
+  if mfIndex != nil
+    # Check if this should only be displayed for specific customers
+    assign customerVisibility = mf.discount_customer_visibility[mfIndex] | handleize
+    assign customerSpecificTags = mf.discount_customer_tags[mfIndex] | split: ','
+
+    if customerVisibility == 'logged-in'
+      # For the logged in condition just ensure the customer is logged in
+      unless customer
+        assign customerAllowed = false
+      endunless
+    elsif customerVisibility == 'specific' and customerSpecificTags.size > 0
+      # For the specific condition check if the customer has one of the specific tags
+      unless customer and customer.tags.size > 0
+        assign customerAllowed = false
+      endunless
+
+      if customerAllowed == true
+        for specificTag in customerSpecificTags
+          assign lcSpecificTag = specificTag | downcase
+          assign lcCustomerTags = customer.tags | downcase
+
+          if lcCustomerTags contains lcSpecificTag
+            assign customerAllowed = true
+            break
+          else
+            assign customerAllowed = false
+          endif
+        endfor
+      endif
+    endif
+
+    # If the customer is allowed to see the discount, get the discount information
+    if customerAllowed == true
+      assign discountValue = mf.discount_value[mfIndex] | plus: 0 | default: 0
+      assign discountTitle = mf.pdp_title[mfIndex] | escape
+      assign discountTitleColour = mf.pdp_title_colour[mfIndex] | escape
+      assign discountAccBorderColor = mf.pdp_accordion_border_color[mfIndex] | escape
+      assign discountMessaging = mf.discount_pdp_messaging[mfIndex] | replace: '#discount#', discountValue
+      assign countdownDate = mf.discount_pdp_countdown_date[mfIndex]
+      assign countdownPostfix = mf.discount_pdp_countdown_postfix[mfIndex]
+      assign loopReturnsValue = mf.discount_loop_returns_property[mfIndex]
+
+      # Check the date and disable the discount if it is in the past
+      if countdownDate != blank
+        assign now = 'now' | date: '%s'
+        assign countdownComparison = countdownDate | date: '%s'
+        assign countdownDiff = countdownComparison | minus: now
+
+        # If the countdown is in the past, disable the discount
+        if countdownDiff < 0
+          assign discountValue = 0
+          assign discountMessaging = nil
+          assign countdownDate = nil
+          assign countdownPostfix = nil
+          assign loopReturnsValue = nil
+        endif
+      endif
+    endif
+  endif
+
+  if discountValue > 0
+    assign discountValue = discountValue | times: 1.0 | divided_by: 100
+  endif
+
+  assign coreTitle = templateProduct.title
+
+  assign priorityBadges = ''
+  for pTag in product.tags      
+    if pTag contains "gated-product"
+      assign isGated = true
+    endif
+    if pTag contains "core-title:"
+      assign coreTitle = pTag | split: "core-title:" | last | strip
+    endif
+    if pTag contains "brauz-exempt"
+      assign brauz_exempt = true
+    endif
+    if pTag contains "badge-priority:"
+      assign priorityBadges = priorityBadges | append: pTag | append: '||'
+    endif
+  endfor
+
+  assign priorityBadges = priorityBadges | split: '||'
+  assign splitTitleVariant = templateProduct.title | split: coreTitle | last | strip
+-%}
+
+{%- liquid
+  capture var
+    render 'locksmith-variables', variable: 'access_granted', scope: 'subject', subject: product
+  endcapture 
+  
+  assign strip_var = var | strip_newlines 
+  assign locksmith_load_success = true
+  if var contains 'error'
+    assign locksmith_load_success = false
+  endif
+
+  if strip_var == 'true'
+    assign locksmith_access_granted = true
+  else
+    assign locksmith_access_granted = false
+  endif 
+-%}
+
+{% capture badges %}
+  <div class="o-product-badges">
+  {%- for priorityBadge in priorityBadges -%}
+    {% assign clean_priority_badge = priorityBadge | remove: 'badge-priority:' | replace: '"', '' %}
+    <span 
+      class="o-product-badges__badge o-product-badges__badge--priority o-paragraph--3 o-product-badges__badge--{{ clean_priority_badge | handleize }}"
+    >
+      {{ clean_priority_badge }}
+    </span>
+    {%- endfor -%}
+  </div>
+{% endcapture %}
+
+<section
+  class="c-product-template"
+  data-product-template
+  data-section-id="{{ section.id }}"
+  data-is-gated="{{ isGated }}"
+>
+<div class="c-product-template__loader c-product-template__loader--rollie-mark">
+    <div class="loading-spinner">
+      {%-
+          render 'svg.logo-secondary' with {
+          class: 'c-header__logo-svg is-secondary'
+          }
+        -%}
+    </div>
+  </div>
+  <div class="c-product-template__inner" {% if isGated %}data-gated-product{% endif %}>
+    {%- comment -%} Product Media Gallery - images & videos {%- endcomment -%}
+    {%- render 'product-gallery' with {
+      galleryProduct: templateProduct,
+      class: 'c-product-template__gallery',
+      badges: badges
+    } -%}
+
+    {% capture product_title %}
+      <product-breadcrumbs
+        data-product-collections="{{ templateProduct.collections | map: 'handle' | join: ',' }}"
+        data-product-title="{{ templateProduct.title }}"
+      ></product-breadcrumbs>
+      {% if isGated %}
+        <h3 class="c-product-template__gated-heading o-paragraph--2">
+          <span class='c-product-template__title-icon'>
+            {% if customer %}
+              {% render 'svg.lock-unlocked' %}
+            {% else %}
+              {% render 'svg.lock-locked' %}
+            {% endif %}
+          </span>
+          {{ settings.pdp_gated_heading }}
+        </h3>
+      {% endif %}
+      <h1 class="c-product-template__title o-heading--6 o-heading--no-dot">
+        {{ coreTitle }}
+      </h1>
+      {% if splitTitleVariant != blank %}
+        <p class="c-product-template__title-variant">{{ splitTitleVariant }}</p>
+      {% endif %}
+    {% endcapture %}
+
+    <div class="c-product-template__details">
+      <div class="c-product-template__details-inner">
+        <div class="product-title--template">
+          {{ product_title }}
+        </div>
+
+        {%- comment -%}
+          Product Form
+          - stars, short description, add to cart, variant & pricing
+        {%- endcomment -%}
+        {%- render 'form.product' with {
+          formProduct: templateProduct,
+          class: 'c-product-template__form',
+          description: shortDescription,
+          discountValue: discountValue,
+          discountTitle: discountTitle,
+          discountTitleColour: discountTitleColour,
+          discountAccBorderColor: discountAccBorderColor,
+          discountMessaging: discountMessaging,
+          countdownDate: countdownDate,
+          countdownPostfix: countdownPostfix,
+          loopReturnsValue: loopReturnsValue,
+          locksmithAccessGranted: locksmith_access_granted,
+          customHTML: section.settings.custom_html,
+          productTitle: product_title
+        } -%}
+
+        {%- comment -%} Sticky Add to Cart {%- endcomment -%}
+        {%- render 'object.sticky-add-to-cart' with {
+          class: 'c-product-template__sticky-atc',
+          discountValue: discountValue,
+          loopReturnsValue: loopReturnsValue
+        } -%}
+
+        {%- comment -%} Product Accordion {%- endcomment -%}
+        {%- render 'object.product-accordion' with {
+          class: 'c-product-template__accordion',
+          accordionProduct: templateProduct,
+          ss: section.settings
+        } -%}
+
+        {%- comment -%}
+          Custom Brauz find-in-store implementation
+        {%- endcomment -%}
+        {% unless brauz_exempt %}
+          <div class="find-in-store-wrapper">
+            {% render 'object.find-in-store' with: {
+              selected_variant: templateProduct.selected_variant,
+              has_only_default_variant: templateProduct.has_only_default_variant,
+              vendor: templateProduct.vendor
+            } %}
+          </div>
+        {% endunless %}
+
+        {%- comment -%} Complete The Look{%- endcomment -%}
+        {% render 'object.complete-the-look', product: templateProduct %}
+      </div>
+    </div>
+  </div>
+  <script type="application/ld+json" data-kiwi-sizing>
+    {
+      "collections": "{{ templateProduct.collections | map: 'id' | join: ','}}",
+      "tags": {{ templateProduct.tags | join: ',' | json}},
+      "product": "{{templateProduct.id}}",
+      "vendor": {{templateProduct.vendor | json}},
+      "type": {{templateProduct.type | json}},
+      "title": {{templateProduct.title | json}},
+      "images": {{templateProduct.images | json}},
+      "options": {{templateProduct.options_with_values | json}},
+      "variants": {{templateProduct.variants | json}}
+    }
+  </script>
+</section>
+
+{% schema %}
+  {
+    "name": "Product Template",
+    "settings": [
+      {
+        "type": "text",
+        "id": "description-heading",
+        "label": "Description Heading",
+        "default": "Description",
+        "info": "Used for relevant accordion heading"
+      },
+      {
+        "type": "text",
+        "id": "fit-heading",
+        "label": "Size & Fit Heading",
+        "default": "Size & Fit",
+        "info": "Used for relevant accordion heading"
+      },
+      {
+        "type": "text",
+        "id": "materials-heading",
+        "label": "Materials Heading",
+        "default": "Materials",
+        "info": "Used for relevant accordion heading"
+      },
+      {
+        "type": "text",
+        "id": "care-heading",
+        "label": "Care Heading",
+        "default": "Care",
+        "info": "Used for relevant accordion heading"
+      },
+      {
+        "type": "text",
+        "id": "shipping-heading",
+        "label": "Shipping Heading",
+        "default": "Shipping & Returns",
+        "info": "Used for relevant accordion heading"
+      },
+      {
+        "type": "page",
+        "id": "shipping-page",
+        "label": "Shipping Page",
+        "info": "Select page to user for shipping accordion content."
+      },
+      {
+        "type": "header",
+        "content": "Gift Wrapping"
+      },
+      {
+        "id": "gift_wrapping_prod",
+        "type": "product",
+        "label": "Gift wrapping product",
+        "info": "If set, an option to add this product will be visible on product pages"
+      },
+      {
+        "id": "gift_wrapping_message",
+        "type": "textarea",
+        "label": "Gift wrapping message",
+        "default": "Add gift wrapping & message"
+      },
+      {
+        "type": "header",
+        "content": "Custom HTML"
+      },
+      {
+        "id": "custom_html",
+        "type": "liquid",
+        "label": "Custom code",
+        "info": "Add custom HTML / Liquid code to the product page. Will sit below product description."
+      }
+    ]
+  }
+{% endschema %}
