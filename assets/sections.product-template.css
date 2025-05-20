@@ -1525,6 +1525,7 @@ html:not(.is-header-sticky) .o-sticky-atc.is-visible {
   border-style: solid;
   padding-top: 0.6875rem;
   padding-bottom: 0.6875rem;
+  color: var(--base-text-color);
 }
 @media only screen and (min-width: 750px) {
   .c-product-form__discount {
